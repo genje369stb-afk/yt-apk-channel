@@ -28,10 +28,10 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393"
 
-      - name: Setup Flutter 3.27.1 (Mendukung wakelock_plus 1.4.0)
+      - name: Setup Flutter 3.24.5 Stabil
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.27.1'
+          flutter-version: '3.24.5'
           channel: 'stable'
 
       - name: Setup Python
@@ -39,7 +39,23 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Flet 0.25.2 & Build APK
+      - name: Buat File pyproject.toml Pengunci Plugin Stabil
+        run: |
+          cat << 'EOF' > pyproject.toml
+          [project]
+          name = "yt-manager-mobile"
+          version = "1.0.0"
+          dependencies = [
+              "flet==0.25.2",
+              "requests"
+          ]
+
+          [tool.flet.flutter.pubspec.dependency_overrides]
+          wakelock_plus = "1.2.8"
+          package_info_plus = "8.0.2"
+          EOF
+
+      - name: Install Flet & Build APK
         env:
           PYTHONUTF8: 1
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m"
