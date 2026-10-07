@@ -23,15 +23,15 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK 34 & NDK Standar (Agar Gradle Tidak Gagal)
+      - name: Setup Android SDK 34 & NDK
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393"
 
-      - name: Setup Flutter 3.24.5 Stabil
+      - name: Setup Flutter 3.27.1 (Mendukung wakelock_plus 1.4.0)
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: '3.24.5'
+          flutter-version: '3.27.1'
           channel: 'stable'
 
       - name: Setup Python
@@ -39,14 +39,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Install Flet & Build APK
+      - name: Install Flet 0.25.2 & Build APK
         env:
           PYTHONUTF8: 1
           GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m"
         run: |
           pip install --upgrade pip
-          pip install "flet==0.24.1" requests
-          flet build apk -vv
+          pip install "flet==0.25.2" requests
+          flet build apk --yes -v
 
       - name: Siapkan File APK untuk Didownload
         uses: actions/upload-artifact@v4
