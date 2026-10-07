@@ -12,13 +12,18 @@ jobs:
       - name: Ambil Kode
         uses: actions/checkout@v4
 
+      - name: Install Paket Linux untuk Flutter Doctor
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev mesa-utils
+
       - name: Setup Java 17 untuk Android
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Flutter Stabil (Bebas Bug JNI)
+      - name: Setup Flutter 3.24.5 Stabil
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
@@ -27,19 +32,20 @@ jobs:
       - name: Setujui Semua Lisensi Android SDK
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          yes | flutter doctor --android-licenses || true
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.11'
 
-      - name: Install Flet Stabil & Build APK
+      - name: Install Flet 0.24.1 & Build APK
         env:
           PYTHONUTF8: 1
         run: |
           pip install --upgrade pip
           pip install "flet==0.24.1" requests
-          flet build apk --yes --skip-flutter-doctor -v
+          flet build apk -v
 
       - name: Siapkan File APK untuk Didownload
         uses: actions/upload-artifact@v4
