@@ -6,27 +6,85 @@ import os
 from datetime import datetime
 
 # =====================================================================
-# PASTIKAN LINK DATABASE FIREBASE KAMU TERTULIS DI BAWAH INI:
+# URL DATABASE BAWAAN (DEFAULT)
+# Jika nanti pindah PC / buat database baru, cukup klik tombol ⚙️ DB
+# di pojok kanan atas aplikasi HP tanpa perlu build ulang APK!
 # =====================================================================
 DEFAULT_FIREBASE_URL = "https://yt-channel-manager-317da-default-rtdb.asia-southeast1.firebasedatabase.app"
 
+# Batas maksimal siklus upload (7 hari).
+# Notifikasi akan berbunyi mulai 3 hari sebelum batas 7 hari berakhir (hari ke-4, 5, 6, dst.)
+BATAS_DEADLINE_HARI = 7
 
-def load_database_url():
-    base_dir = os.path.dirname(os.path.abspath(__file__))
-    possible_paths = [
-        os.path.join(base_dir, "db_config.json"),
-        os.path.join(base_dir, "..", "db_config.json"),
-    ]
-    for path in possible_paths:
-        if os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8") as f:
-                    url = json.load(f).get("firebase_url", "").strip()
-                    if url:
-                        return url
-            except Exception:
-                pass
-    return DEFAULT_FIREBASE_URL.strip()
+
+# =====================================================================
+# FUNGSI KOMPATIBILITAS OTOMATIS (JALAN DI FLET PC TERBARU & FLET APK)
+# =====================================================================
+def make_border_all(width, color):
+    if hasattr(ft, "Border") and hasattr(ft.Border, "all"):
+        return ft.Border.all(width, color)
+    return ft.border.all(width, color)
+
+
+def make_button(text, bgcolor, color="#ffffff", on_click=None, width=None, height=None, expand=False):
+    if hasattr(ft, "ElevatedButton"):
+        return ft.ElevatedButton(
+            text=text,
+            bgcolor=bgcolor,
+            color=color,
+            width=width,
+            height=height,
+            expand=expand,
+            on_click=on_click,
+        )
+    else:
+        return ft.Button(
+            content=ft.Text(text, color=color, weight=ft.FontWeight.BOLD, size=12),
+            bgcolor=bgcolor,
+            width=width,
+            height=height,
+            expand=expand,
+            on_click=on_click,
+        )
+
+
+def make_outlined_button(text, color="#38bdf8", on_click=None, expand=False):
+    try:
+        return ft.OutlinedButton(
+            content=ft.Text(text, color=color, weight=ft.FontWeight.BOLD, size=12),
+            expand=expand,
+            on_click=on_click,
+        )
+    except Exception:
+        return ft.OutlinedButton(
+            text=text,
+            expand=expand,
+            on_click=on_click,
+        )
+
+
+def open_dialog_compat(page, dlg):
+    try:
+        if hasattr(page, "show_dialog"):
+            page.show_dialog(dlg)
+            return
+    except Exception:
+        pass
+    if dlg not in page.overlay:
+        page.overlay.append(dlg)
+    dlg.open = True
+    page.update()
+
+
+def close_dialog_compat(page, dlg):
+    try:
+        if hasattr(page, "pop_dialog"):
+            page.pop_dialog()
+            return
+    except Exception:
+        pass
+    dlg.open = False
+    page.update()
 
 
 def main(page: ft.Page):
@@ -35,22 +93,72 @@ def main(page: ft.Page):
     page.bgcolor = "#09090b"
     page.padding = 0
 
+    try:
+        page.window.width = 410
+        page.window.height = 800
+    except Exception:
+        pass
+
     channels_data = {}
+    notifikasi_sudah_muncul_sesi_ini = {"shown": False}
+
+    # ==========================================
+    # PENYIMPANAN LINK DATABASE PERMANEN DI HP & PC
+    # ==========================================
+    def get_saved_db_url():
+        try:
+            if hasattr(page, "client_storage"):
+                saved = page.client_storage.get("custom_firebase_url")
+                if saved and saved.strip():
+                    return saved.strip()
+        except Exception:
+            pass
+
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        for path in [os.path.join(base_dir, "db_config.json"), os.path.join(base_dir, "..", "db_config.json")]:
+            if os.path.exists(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        url = json.load(f).get("firebase_url", "").strip()
+                        if url:
+                            return url
+                except Exception:
+                    pass
+
+        return DEFAULT_FIREBASE_URL.strip()
+
+    def save_custom_db_url(new_url):
+        clean = new_url.strip().rstrip("/")
+        if clean.endswith(".json"):
+            clean = clean[:-5].rstrip("/")
+        if clean.endswith("/channels"):
+            clean = clean[:-9].rstrip("/")
+
+        try:
+            if hasattr(page, "client_storage"):
+                page.client_storage.set("custom_firebase_url", clean)
+        except Exception:
+            pass
+
+        try:
+            base_dir = os.path.dirname(os.path.abspath(__file__))
+            cfg_path = os.path.join(base_dir, "db_config.json")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump({"firebase_url": clean}, f, indent=2)
+        except Exception:
+            pass
+
+        return clean
 
     def show_snack(pesan, warna="#16a34a"):
         snack = ft.SnackBar(
             content=ft.Text(pesan, color="#ffffff", weight=ft.FontWeight.BOLD),
             bgcolor=warna,
         )
-        try:
-            page.overlay.append(snack)
-            snack.open = True
-            page.update()
-        except Exception:
-            pass
+        open_dialog_compat(page, snack)
 
     def get_endpoint():
-        url = load_database_url()
+        url = get_saved_db_url()
         if not url:
             return None
         clean = url.rstrip("/")
@@ -60,6 +168,202 @@ def main(page: ft.Page):
             clean = clean[:-9].rstrip("/")
         return f"{clean}/channels"
 
+    # ==========================================
+    # LOGIKA PENGECEKAN NOTIFIKASI (H-3 SEBELUM DEADLINE)
+    # ==========================================
+    def kumpulkan_channel_wajib_upload():
+        """
+        Mencari channel yang masuk H-3 sebelum deadline berakhir:
+        1. Jika tanggal adalah tanggal upload terakhir: batas aman adalah 7 hari.
+           Maka 3 hari sebelum batas 7 hari berakhir adalah hari ke-4, 5, 6, 7 (dan yang sudah lewat > 7 hari).
+        2. Jika tanggal disetel sebagai tanggal target ke depan (terjadwal):
+           Maka 3 hari sebelum tanggal tersebut (selisih -3, -2, -1 hari) juga ikut diingatkan.
+        """
+        daftar_notif = []
+        hari_ini = datetime.now().date()
+        sorted_items = sorted(channels_data.items(), key=parse_sort_key)
+
+        for ch_id, item in sorted_items:
+            nama = item.get("nama_channel", "Tanpa Nama")
+            tgl_str = item.get("last_upload", "").strip()
+            try:
+                tgl_upload = datetime.strptime(tgl_str, "%Y-%m-%d").date()
+                selisih = (hari_ini - tgl_upload).days
+                sisa_ke_deadline = BATAS_DEADLINE_HARI - selisih
+
+                # Kondisi 1: 3 hari sebelum batas 7 hari berakhir (hari ke-4 s/d ke-7)
+                if 4 <= selisih <= 7:
+                    if sisa_ke_deadline == 0:
+                        ket_waktu = "Deadline Hari Ini! (Sudah 7 hari belum upload)"
+                    else:
+                        ket_waktu = f"Sisa {sisa_ke_deadline} hari sebelum deadline ({selisih} hari lalu)"
+                    daftar_notif.append({
+                        "nama": nama,
+                        "pesan": f"Segera lakukan upload di channel {nama}",
+                        "detail": ket_waktu,
+                        "warna": "#d97706"
+                    })
+
+                # Kondisi 2: Sudah lewat batas deadline (> 7 hari / Pasif)
+                elif selisih > 7:
+                    daftar_notif.append({
+                        "nama": nama,
+                        "pesan": f"Segera lakukan upload di channel {nama}",
+                        "detail": f"Sudah lewat deadline! ({selisih} hari belum upload)",
+                        "warna": "#dc2626"
+                    })
+
+                # Kondisi 3: Jika user mengatur tanggal di masa depan (H-3 sampai H-1 jadwal upload)
+                elif -3 <= selisih < 0:
+                    daftar_notif.append({
+                        "nama": nama,
+                        "pesan": f"Segera lakukan upload di channel {nama}",
+                        "detail": f"Jadwal upload {abs(selisih)} hari lagi ({tgl_str})",
+                        "warna": "#0284c7"
+                    })
+            except Exception:
+                pass
+
+        return daftar_notif
+
+    def open_notification_dialog(auto_trigger=False):
+        daftar_notif = kumpulkan_channel_wajib_upload()
+
+        # Jika dipanggil otomatis saat buka aplikasi dan tidak ada channel yang mendekati deadline, tidak perlu muncul popup
+        if auto_trigger and len(daftar_notif) == 0:
+            return
+
+        def tutup_notif(e=None):
+            close_dialog_compat(page, dlg_notif)
+
+        list_notif_controls = []
+        if len(daftar_notif) == 0:
+            list_notif_controls.append(
+                ft.Container(
+                    padding=16,
+                    bgcolor="#27272a",
+                    border_radius=8,
+                    content=ft.Text(
+                        "✅ Semua channel masih dalam batas aman!\nBelum ada channel yang mendekati 3 hari sebelum deadline.",
+                        size=12,
+                        color="#4ade80",
+                        text_align=ft.TextAlign.CENTER,
+                    ),
+                )
+            )
+        else:
+            for item_n in daftar_notif:
+                list_notif_controls.append(
+                    ft.Container(
+                        bgcolor="#27272a",
+                        border=make_border_all(1, item_n["warna"]),
+                        border_radius=8,
+                        padding=10,
+                        content=ft.Column([
+                            ft.Text(
+                                f"⚠️ {item_n['pesan']}",
+                                size=12,
+                                weight=ft.FontWeight.BOLD,
+                                color="#ffffff",
+                            ),
+                            ft.Text(
+                                f"⏰ {item_n['detail']}",
+                                size=11,
+                                color=item_n["warna"],
+                                weight=ft.FontWeight.BOLD,
+                            ),
+                        ], spacing=3),
+                    )
+                )
+
+        dlg_notif = ft.AlertDialog(
+            bgcolor="#18181b",
+            title=ft.Row([
+                ft.Text(
+                    f"🔔 Peringatan Upload ({len(daftar_notif)})",
+                    size=15,
+                    weight=ft.FontWeight.BOLD,
+                    color="#facc15" if daftar_notif else "#4ade80",
+                )
+            ]),
+            content=ft.Container(
+                width=310,
+                height=280 if len(daftar_notif) > 2 else None,
+                content=ft.Column(
+                    controls=list_notif_controls,
+                    spacing=8,
+                    scroll=ft.ScrollMode.AUTO,
+                    tight=True,
+                ),
+            ),
+            actions=[
+                make_button("Mengerti & Tutup", bgcolor="#2563eb", on_click=tutup_notif),
+            ],
+        )
+
+        open_dialog_compat(page, dlg_notif)
+
+    # ==========================================
+    # POPUP GANTI DATABASE (UNTUK PINDAH PC / DB BARU)
+    # ==========================================
+    def open_db_settings_dialog(e=None):
+        current_url = get_saved_db_url()
+        txt_url_input = ft.TextField(
+            value=current_url,
+            label="Link Firebase Database",
+            hint_text="https://nama-project-default-rtdb.firebasedatabase.app",
+            text_size=12,
+            border_color="#38bdf8",
+            bgcolor="#27272a",
+            color="#ffffff",
+        )
+
+        def tutup_dlg(e=None):
+            close_dialog_compat(page, dlg_db)
+
+        def simpan_db_baru(e):
+            val = (txt_url_input.value or "").strip()
+            if not val.startswith("https://"):
+                show_snack("⚠️ Link harus diawali https://", "#d97706")
+                return
+            save_custom_db_url(val)
+            tutup_dlg()
+            show_snack("✅ Database baru berhasil disimpan!", "#16a34a")
+            notifikasi_sudah_muncul_sesi_ini["shown"] = False
+            sync_data()
+
+        def reset_ke_default(e):
+            save_custom_db_url(DEFAULT_FIREBASE_URL)
+            tutup_dlg()
+            show_snack("🔄 Dikembalikan ke Database Bawaan", "#0284c7")
+            notifikasi_sudah_muncul_sesi_ini["shown"] = False
+            sync_data()
+
+        dlg_db = ft.AlertDialog(
+            bgcolor="#18181b",
+            title=ft.Text("⚙️ Pengaturan Link Database", size=16, weight=ft.FontWeight.BOLD, color="#f4f4f5"),
+            content=ft.Container(
+                width=300,
+                content=ft.Column([
+                    ft.Text(
+                        "Jika Anda membuat database baru di PC lain, salin Link Database dari aplikasi PC lalu tempelkan di bawah ini:",
+                        size=12, color="#a1a1aa"
+                    ),
+                    txt_url_input,
+                ], tight=True, spacing=10)
+            ),
+            actions=[
+                ft.TextButton("Reset Bawaan", on_click=reset_ke_default),
+                ft.TextButton("Batal", on_click=tutup_dlg),
+                make_button("Simpan", bgcolor="#16a34a", on_click=simpan_db_baru),
+            ]
+        )
+
+        open_dialog_compat(page, dlg_db)
+
+    # ==========================================
+    # LOGIKA SORTING & SELISIH HARI
+    # ==========================================
     def parse_sort_key(item_tuple):
         _, data = item_tuple
         tgl_str = data.get("last_upload", "").strip()
@@ -75,16 +379,17 @@ def main(page: ft.Page):
             tgl_upload = datetime.strptime(tanggal_str.strip(), "%Y-%m-%d").date()
             hari_ini = datetime.now().date()
             selisih = (hari_ini - tgl_upload).days
+            sisa = BATAS_DEADLINE_HARI - selisih
             if selisih == 0:
-                return "Upload Hari Ini", "#16a34a"
+                return "Upload Hari Ini (Aman)", "#16a34a"
             elif selisih < 0:
                 return f"Terjadwal ({abs(selisih)} hari lagi)", "#0284c7"
             elif selisih <= 3:
-                return f"{selisih} hari lalu (Aman)", "#16a34a"
+                return f"{selisih} hari lalu • Sisa {sisa} hr (Aman)", "#16a34a"
             elif selisih <= 7:
-                return f"{selisih} hari lalu (Perlu Upload)", "#d97706"
+                return f"⚠️ H-{sisa} Deadline! ({selisih} hr lalu)", "#d97706"
             else:
-                return f"{selisih} hari lalu (Pasif!)", "#dc2626"
+                return f"🚨 Lewat Deadline! ({selisih} hr lalu)", "#dc2626"
         except Exception:
             return "Format Bebas", "#52525b"
 
@@ -108,6 +413,9 @@ def main(page: ft.Page):
         except Exception as e:
             show_snack(f"❌ Error koneksi: {e}", "#dc2626")
 
+    # ==========================================
+    # DIALOG POPUP KALENDER INTERAKTIF
+    # ==========================================
     def open_calendar_dialog(ch_id, nama_ch, current_date_str):
         try:
             dt = datetime.strptime(current_date_str.strip(), "%Y-%m-%d")
@@ -125,8 +433,7 @@ def main(page: ft.Page):
         cal_grid = ft.Column(spacing=4)
 
         def tutup_dialog(e=None):
-            dlg_cal.open = False
-            page.update()
+            close_dialog_compat(page, dlg_cal)
 
         def pilih_dan_tutup(tgl_str):
             tutup_dialog()
@@ -220,10 +527,9 @@ def main(page: ft.Page):
                     ),
                     cal_grid,
                     ft.Divider(color="#27272a", height=12),
-                    ft.ElevatedButton(
+                    make_button(
                         text=f"⚡ Pilih Hari Ini ({today_str})",
                         bgcolor="#2563eb",
-                        color="#ffffff",
                         width=290,
                         height=40,
                         on_click=lambda e: pilih_dan_tutup(today_str)
@@ -235,10 +541,12 @@ def main(page: ft.Page):
             ]
         )
 
-        page.overlay.append(dlg_cal)
-        dlg_cal.open = True
         render_cal()
+        open_dialog_compat(page, dlg_cal)
 
+    # ==========================================
+    # KOMPONEN DAFTAR CARD, HEADER & FOOTER
+    # ==========================================
     lbl_status_sync = ft.Text("Status: Menunggu sinkronisasi...", size=11, color="#a1a1aa")
     lbl_total_channel = ft.Text(
         "Daftar Channel (0) • Urut Prioritas",
@@ -257,7 +565,7 @@ def main(page: ft.Page):
                 ft.Container(
                     padding=40,
                     content=ft.Text(
-                        "Belum ada data channel.\nSilakan input channel melalui aplikasi Desktop di PC Anda lalu tekan tombol Sinkron.",
+                        "Belum ada data channel di database ini.\nJika Anda baru mengganti database di PC lain, tekan tombol ⚙️ DB di pojok kanan atas untuk mengganti Link Database.",
                         color="#71717a",
                         text_align=ft.TextAlign.CENTER,
                         size=13
@@ -278,9 +586,28 @@ def main(page: ft.Page):
 
             info_hari, badge_color = hitung_selisih_hari(last_up)
 
+            # Cek apakah channel ini wajib diberi banner peringatan upload di dalam card-nya
+            perlu_peringatan = badge_color in ("#d97706", "#dc2626")
+            komponen_peringatan = []
+            if perlu_peringatan:
+                komponen_peringatan.append(
+                    ft.Container(
+                        bgcolor="#27272a",
+                        border=make_border_all(1, badge_color),
+                        border_radius=6,
+                        padding=6,
+                        content=ft.Text(
+                            f"🔔 Segera lakukan upload di channel {nama}!",
+                            size=11,
+                            weight=ft.FontWeight.BOLD,
+                            color="#facc15" if badge_color == "#d97706" else "#fca5a5",
+                        ),
+                    )
+                )
+
             card = ft.Container(
                 bgcolor="#18181b",
-                border=ft.border.all(2, badge_color),
+                border=make_border_all(2, badge_color),
                 border_radius=12,
                 padding=12,
                 content=ft.Column([
@@ -298,21 +625,21 @@ def main(page: ft.Page):
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
 
                     ft.Text(f"Status: {info_hari}", size=12, weight=ft.FontWeight.BOLD, color=badge_color),
+                    *komponen_peringatan,
                     ft.Text(f"✉️ {email}", size=12, color="#a1a1aa"),
                     ft.Text(f"📝 {ket if ket else 'Tidak ada catatan'}", size=12, color="#71717a"),
 
                     ft.Divider(color="#27272a", height=8),
 
                     ft.Row([
-                        ft.OutlinedButton(
+                        make_outlined_button(
                             text="📅 Pilih Kalender",
                             expand=True,
                             on_click=lambda e, cid=ch_id, nm=nama, lu=last_up: open_calendar_dialog(cid, nm, lu)
                         ),
-                        ft.ElevatedButton(
+                        make_button(
                             text="⚡ Set Hari Ini",
                             bgcolor="#16a34a",
-                            color="#ffffff",
                             expand=True,
                             on_click=lambda e, cid=ch_id, nm=nama: update_tanggal_channel(cid, nm, today_str)
                         )
@@ -326,7 +653,7 @@ def main(page: ft.Page):
     def sync_data(e=None):
         endpoint = get_endpoint()
         if not endpoint:
-            lbl_status_sync.value = "⚠️ Hubungkan Link Database terlebih dahulu"
+            lbl_status_sync.value = "⚠️ Klik tombol ⚙️ DB di atas untuk mengatur Link Database"
             lbl_status_sync.color = "#facc15"
             page.update()
             return
@@ -346,12 +673,17 @@ def main(page: ft.Page):
                 lbl_status_sync.value = f"✅ Terhubung & Disinkronkan ({waktu})"
                 lbl_status_sync.color = "#4ade80"
                 render_cards()
+
+                # Munculkan popup notifikasi otomatis 1x saat aplikasi dibuka / sinkron pertama
+                if not notifikasi_sudah_muncul_sesi_ini["shown"]:
+                    notifikasi_sudah_muncul_sesi_ini["shown"] = True
+                    open_notification_dialog(auto_trigger=True)
             else:
                 lbl_status_sync.value = f"❌ Gagal sinkron (HTTP {res.status_code})"
                 lbl_status_sync.color = "#f87171"
                 page.update()
         except Exception as err:
-            lbl_status_sync.value = "❌ Gagal sinkron: Periksa koneksi internet"
+            lbl_status_sync.value = "❌ Gagal sinkron: Periksa koneksi / Link DB"
             lbl_status_sync.color = "#f87171"
             show_snack(f"Error: {err}", "#dc2626")
             page.update()
@@ -360,27 +692,39 @@ def main(page: ft.Page):
         bgcolor="#18181b",
         padding=14,
         content=ft.Column([
+            # Baris Judul + Tombol 🔔 Notif + Tombol ⚙️ DB + Tombol 🔄 Sinkron
             ft.Row([
-                ft.Text("▶ YT MANAGER MOBILE", size=17, weight=ft.FontWeight.BOLD, color="#ef4444"),
-                ft.ElevatedButton(
-                    text="🔄 Sinkron",
-                    bgcolor="#2563eb",
-                    color="#ffffff",
-                    height=34,
-                    on_click=sync_data
-                )
+                ft.Text("▶ YT MANAGER", size=15, weight=ft.FontWeight.BOLD, color="#ef4444"),
+                ft.Row([
+                    make_button(
+                        text="🔔",
+                        bgcolor="#d97706",
+                        color="#ffffff",
+                        height=34,
+                        on_click=lambda e: open_notification_dialog(auto_trigger=False)
+                    ),
+                    make_button(
+                        text="⚙️ DB",
+                        bgcolor="#27272a",
+                        color="#38bdf8",
+                        height=34,
+                        on_click=open_db_settings_dialog
+                    ),
+                    make_button(
+                        text="🔄 Sinkron",
+                        bgcolor="#2563eb",
+                        color="#ffffff",
+                        height=34,
+                        on_click=sync_data
+                    ),
+                ], spacing=5)
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-
-            ft.Text(
-                "ℹ️ Untuk mengetahui Link Database, silakan buka aplikasi Desktop di PC Anda.",
-                size=11, color="#38bdf8", italic=True
-            ),
 
             ft.Row([lbl_total_channel, lbl_status_sync], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True),
 
             ft.Container(
                 bgcolor="#09090b",
-                border=ft.border.all(1, "#27272a"),
+                border=make_border_all(1, "#27272a"),
                 border_radius=8,
                 padding=8,
                 content=ft.Column([
@@ -396,7 +740,7 @@ def main(page: ft.Page):
                             ], spacing=5),
                             ft.Row([
                                 ft.Container(width=10, height=10, bgcolor="#d97706", border_radius=3),
-                                ft.Text("Oranye: Upload (4–7 Hr)", size=10, color="#e4e4e7")
+                                ft.Text("Oranye: H-3 Deadline (4–7 Hr)", size=10, color="#e4e4e7")
                             ], spacing=5),
                         ], spacing=3, expand=True),
                         ft.Column([
@@ -415,7 +759,27 @@ def main(page: ft.Page):
         ], spacing=5)
     )
 
-    page.add(ft.Column([header_bar, list_cards], expand=True, spacing=0))
+    # ==========================================
+    # FOOTER MERAH PERMANEN DI BAGIAN BAWAH
+    # ==========================================
+    footer_bar = ft.Container(
+        bgcolor="#dc2626",
+        padding=10,
+        content=ft.Row(
+            [
+                ft.Text(
+                    "Untuk Menambah Channel Silahkan Buka Versi Dekstop/PC",
+                    size=12,
+                    weight=ft.FontWeight.BOLD,
+                    color="#ffffff",
+                    text_align=ft.TextAlign.CENTER,
+                )
+            ],
+            alignment=ft.MainAxisAlignment.CENTER,
+        ),
+    )
+
+    page.add(ft.Column([header_bar, list_cards, footer_bar], expand=True, spacing=0))
     sync_data()
 
 
