@@ -12,10 +12,10 @@ jobs:
       - name: Ambil Kode
         uses: actions/checkout@v4
 
-      - name: Install Paket Linux untuk Flutter Doctor
+      - name: Install Paket Linux
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev mesa-utils
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev mesa-utils zip unzip
 
       - name: Setup Java 17 untuk Android
         uses: actions/setup-java@v4
@@ -23,29 +23,30 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Setup Android SDK 34 & NDK Standar (Agar Gradle Tidak Gagal)
+        run: |
+          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
+          $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager "platforms;android-34" "build-tools;34.0.0" "ndk;25.1.8937393"
+
       - name: Setup Flutter 3.24.5 Stabil
         uses: subosito/flutter-action@v2
         with:
           flutter-version: '3.24.5'
           channel: 'stable'
 
-      - name: Setujui Semua Lisensi Android SDK
-        run: |
-          yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-          yes | flutter doctor --android-licenses || true
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: Install Flet 0.24.1 & Build APK
+      - name: Install Flet & Build APK
         env:
           PYTHONUTF8: 1
+          GRADLE_OPTS: "-Dorg.gradle.daemon=false -Dorg.gradle.jvmargs=-Xmx4096m"
         run: |
           pip install --upgrade pip
           pip install "flet==0.24.1" requests
-          flet build apk -v
+          flet build apk -vv
 
       - name: Siapkan File APK untuk Didownload
         uses: actions/upload-artifact@v4
