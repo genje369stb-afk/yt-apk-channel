@@ -23,11 +23,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install Flet Lengkap & Build APK
+      - name: Install Flet & Build APK
+        env:
+          PYTHONUTF8: 1
         run: |
           pip install --upgrade pip
-          pip install "flet[all]" requests
-          flet build apk -v
+          pip install flet flet-cli requests
+          flet build apk --yes --no-rich-output -v
 
       - name: Siapkan File APK untuk Didownload
         uses: actions/upload-artifact@v4
