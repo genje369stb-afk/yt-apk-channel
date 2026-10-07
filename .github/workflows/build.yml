@@ -12,23 +12,25 @@ jobs:
       - name: Ambil Kode
         uses: actions/checkout@v4
 
-      - name: Setup Flutter
-        uses: subosito/flutter-action@v2
+      - name: Setup Java 17 untuk Android
+        uses: actions/setup-java@v4
         with:
-          channel: 'stable'
+          distribution: 'temurin'
+          java-version: '17'
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
 
-      - name: Install Flet & Build APK
+      - name: Install Flet Lengkap & Build APK
         run: |
-          pip install flet requests
-          flet build apk --project "YT Manager Mobile"
+          pip install --upgrade pip
+          pip install "flet[all]" requests
+          flet build apk -v
 
       - name: Siapkan File APK untuk Didownload
         uses: actions/upload-artifact@v4
         with:
           name: YT_Manager_Mobile_APK
-          path: build/apk/*.apk
+          path: build/apk/**/*.apk
