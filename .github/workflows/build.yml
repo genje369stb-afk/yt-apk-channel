@@ -39,7 +39,7 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Buat File pyproject.toml Pengunci Plugin Stabil
+      - name: Buat File pyproject.toml Pengunci Plugin & Icon
         run: |
           cat << 'EOF' > pyproject.toml
           [project]
@@ -49,6 +49,14 @@ jobs:
               "flet==0.25.2",
               "requests"
           ]
+
+          [tool.flet]
+          product_name = "YT Manager"
+          org = "com.ytmanager.app"
+
+          [tool.flet.app]
+          path = "."
+          assets_dir = "assets"
 
           [tool.flet.flutter.pubspec.dependency_overrides]
           wakelock_plus = "1.2.8"
@@ -62,7 +70,7 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install "flet==0.25.2" requests
-          flet build apk -vv
+          flet build apk --project "YT Manager" -vv
 
       - name: Siapkan File APK untuk Didownload
         uses: actions/upload-artifact@v4
