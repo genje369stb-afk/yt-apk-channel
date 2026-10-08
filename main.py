@@ -26,6 +26,12 @@ def make_border_all(width, color):
     return ft.border.all(width, color)
 
 
+def make_padding_only(left=0, top=0, right=0, bottom=0):
+    if hasattr(ft, "Padding") and hasattr(ft.Padding, "only"):
+        return ft.Padding.only(left=left, top=top, right=right, bottom=bottom)
+    return ft.padding.only(left=left, top=top, right=right, bottom=bottom)
+
+
 def make_button(text, bgcolor, color="#ffffff", on_click=None, width=None, height=None, expand=False):
     if hasattr(ft, "ElevatedButton"):
         return ft.ElevatedButton(
@@ -172,13 +178,6 @@ def main(page: ft.Page):
     # LOGIKA PENGECEKAN NOTIFIKASI (H-3 SEBELUM DEADLINE)
     # ==========================================
     def kumpulkan_channel_wajib_upload():
-        """
-        Mencari channel yang masuk H-3 sebelum deadline berakhir:
-        1. Jika tanggal adalah tanggal upload terakhir: batas aman adalah 7 hari.
-           Maka 3 hari sebelum batas 7 hari berakhir adalah hari ke-4, 5, 6, 7 (dan yang sudah lewat > 7 hari).
-        2. Jika tanggal disetel sebagai tanggal target ke depan (terjadwal):
-           Maka 3 hari sebelum tanggal tersebut (selisih -3, -2, -1 hari) juga ikut diingatkan.
-        """
         daftar_notif = []
         hari_ini = datetime.now().date()
         sorted_items = sorted(channels_data.items(), key=parse_sort_key)
@@ -229,7 +228,6 @@ def main(page: ft.Page):
     def open_notification_dialog(auto_trigger=False):
         daftar_notif = kumpulkan_channel_wajib_upload()
 
-        # Jika dipanggil otomatis saat buka aplikasi dan tidak ada channel yang mendekati deadline, tidak perlu muncul popup
         if auto_trigger and len(daftar_notif) == 0:
             return
 
@@ -586,7 +584,6 @@ def main(page: ft.Page):
 
             info_hari, badge_color = hitung_selisih_hari(last_up)
 
-            # Cek apakah channel ini wajib diberi banner peringatan upload di dalam card-nya
             perlu_peringatan = badge_color in ("#d97706", "#dc2626")
             komponen_peringatan = []
             if perlu_peringatan:
@@ -674,7 +671,6 @@ def main(page: ft.Page):
                 lbl_status_sync.color = "#4ade80"
                 render_cards()
 
-                # Munculkan popup notifikasi otomatis 1x saat aplikasi dibuka / sinkron pertama
                 if not notifikasi_sudah_muncul_sesi_ini["shown"]:
                     notifikasi_sudah_muncul_sesi_ini["shown"] = True
                     open_notification_dialog(auto_trigger=True)
@@ -688,9 +684,13 @@ def main(page: ft.Page):
             show_snack(f"Error: {err}", "#dc2626")
             page.update()
 
+    # ==========================================
+    # HEADER DENGAN JARAK AMAN DARI STATUS BAR HP
+    # ==========================================
     header_bar = ft.Container(
         bgcolor="#18181b",
-        padding=14,
+        # Diberi jarak atas (top=36) agar turun ke bawah dan tidak tertutup jam/baterai HP
+        padding=make_padding_only(left=14, top=36, right=14, bottom=12),
         content=ft.Column([
             # Baris Judul + Tombol 🔔 Notif + Tombol ⚙️ DB + Tombol 🔄 Sinkron
             ft.Row([
@@ -700,24 +700,24 @@ def main(page: ft.Page):
                         text="🔔",
                         bgcolor="#d97706",
                         color="#ffffff",
-                        height=34,
+                        height=36,
                         on_click=lambda e: open_notification_dialog(auto_trigger=False)
                     ),
                     make_button(
                         text="⚙️ DB",
                         bgcolor="#27272a",
                         color="#38bdf8",
-                        height=34,
+                        height=36,
                         on_click=open_db_settings_dialog
                     ),
                     make_button(
                         text="🔄 Sinkron",
                         bgcolor="#2563eb",
                         color="#ffffff",
-                        height=34,
+                        height=36,
                         on_click=sync_data
                     ),
-                ], spacing=5)
+                ], spacing=6)
             ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
 
             ft.Row([lbl_total_channel, lbl_status_sync], alignment=ft.MainAxisAlignment.SPACE_BETWEEN, wrap=True),
@@ -756,7 +756,7 @@ def main(page: ft.Page):
                     ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN)
                 ], spacing=4)
             )
-        ], spacing=5)
+        ], spacing=6)
     )
 
     # ==========================================
@@ -764,7 +764,7 @@ def main(page: ft.Page):
     # ==========================================
     footer_bar = ft.Container(
         bgcolor="#dc2626",
-        padding=10,
+        padding=make_padding_only(left=10, top=10, right=10, bottom=12),
         content=ft.Row(
             [
                 ft.Text(
@@ -779,7 +779,14 @@ def main(page: ft.Page):
         ),
     )
 
-    page.add(ft.Column([header_bar, list_cards, footer_bar], expand=True, spacing=0))
+    main_layout = ft.Column([header_bar, list_cards, footer_bar], expand=True, spacing=0)
+
+    # Bungkus dengan SafeArea agar tidak menabrak status bar atas & navigasi bawah Android
+    if hasattr(ft, "SafeArea"):
+        page.add(ft.SafeArea(content=main_layout, expand=True))
+    else:
+        page.add(main_layout)
+
     sync_data()
 
 
